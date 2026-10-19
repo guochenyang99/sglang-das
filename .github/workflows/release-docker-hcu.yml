@@ -30,6 +30,7 @@ jobs:
     runs-on: [ci, bw1100]
     outputs:
       docker_image: ${{ steps.gen-tag.outputs.docker_image }}
+      image_id: ${{ steps.published-image.outputs.image_id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,6 +76,13 @@ jobs:
           docker push "${HARBOR_SITE}/${HARBOR_NAMESPACE}/${IMAGE_TAG}"
           docker push "${HARBOR_SITE}/${HARBOR_NAMESPACE}/${LATEST_TAG}"
 
+      - name: Record the published image identity
+        id: published-image
+        run: |
+          image_id="$(docker image inspect --format '{{.Id}}' "${HARBOR_SITE}/${HARBOR_NAMESPACE}/${IMAGE_TAG}")"
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "image_id=$image_id" >> "$GITHUB_OUTPUT"
+
       # 其他容器 job 会以 root 在共享 workspace 留下文件, 导致下次 checkout 清理失败
       - name: 清理 workspace
         if: always()
@@ -83,9 +91,14 @@ jobs:
   # Test the exact image only after the build and both pushes succeed.
   test-models:
     needs: build
+    permissions:
+      contents: read
+      actions: write
     uses: ./.github/workflows/cookbook-deployment-smoke.yml
     with:
       image: ${{ needs.build.outputs.docker_image }}
+      image-id: ${{ needs.build.outputs.image_id }}
+      hardware: all
       mode: execute
     secrets: inherit
 
